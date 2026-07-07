@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>學生學習與功課署 | Roster Engine</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { brand: { orange: '#F97316', black: '#171717', white: '#FFFFFF' } } } }
+        }
+    </script>
+    <!-- Chart.js (雷達圖) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 3px; }
+        .tab-section { display: none; }
+        .tab-section.active { display: block; animation: fadeIn 0.25s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col pb-16 md:pb-0">
+
+    <!-- 🔑 1. 學生專屬 Google 登入防護罩 -->
+    <div id="login-overlay" class="fixed inset-0 bg-brand-black z-[100] flex flex-col items-center justify-center text-white transition-opacity duration-300">
+        <div class="w-16 h-16 rounded-xl bg-brand-orange flex items-center justify-center text-white font-bold text-4xl mb-6 shadow-lg shadow-orange-500/30">S</div>
+        <h1 class="text-3xl font-bold mb-2 tracking-wider">Roster Engine</h1>
+        <p class="text-gray-400 mb-8 text-sm bg-gray-800 px-4 py-1.5 rounded-full">學生與科長終端入口</p>
+        <button id="btn-google-login" class="bg-white text-gray-900 px-6 py-3 rounded-xl font-bold flex items-center gap-3 hover:bg-gray-100 transition-all hover:scale-105 shadow-xl">
+            <img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-5 h-5"> 使用學校 Google 帳號登入
+        </button>
+        <div id="login-status" class="mt-4 text-sm text-red-400 hidden bg-red-900/20 px-4 py-2 rounded-lg border border-red-900/30"></div>
+    </div>
+
+    <!-- 頂部導航欄 -->
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-6xl mx-auto px-4 h-16 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded bg-brand-orange flex items-center justify-center text-white font-bold text-base">S</div>
+                <span class="font-bold text-gray-900 tracking-wide">Roster Engine 學生端</span>
+            </div>
+            
+            <!-- 桌面端分頁標籤 -->
+            <nav class="hidden md:flex gap-1">
+                <button data-tab="tab-dashboard" class="tab-btn px-4 py-2 rounded-lg font-medium text-brand-orange bg-brand-orange/10 flex items-center gap-2"><i class="ph ph-house text-lg"></i>首頁行事曆</button>
+                <button data-tab="tab-homework" class="tab-btn px-4 py-2 rounded-lg font-medium text-gray-500 hover:bg-gray-100 flex items-center gap-2"><i class="ph ph-notebook text-lg"></i>功課控制台</button>
+                <button data-tab="tab-performance" class="tab-btn px-4 py-2 rounded-lg font-medium text-gray-500 hover:bg-gray-100 flex items-center gap-2"><i class="ph ph-chart-bar text-lg"></i>我的成績表現</button>
+            </nav>
+
+            <!-- 學生資訊簡介 -->
+            <div class="flex items-center gap-3">
+                <div class="text-right flex flex-col justify-center">
+                    <span id="stu-display-name" class="text-xs font-bold text-gray-800 leading-none">載入中...</span>
+                    <span id="stu-display-meta" class="text-[10px] text-gray-500 font-mono mt-1 leading-none">S- / -</span>
+                </div>
+                <button id="btn-logout" class="p-2 text-gray-400 hover:text-red-500 rounded-lg" title="登出"><i class="ph ph-sign-out text-xl"></i></button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 max-w-6xl w-full mx-auto p-4 overflow-x-hidden">
+        
+        <!-- 🏠 分頁一：DASHBOARD & LIVE TIMETABLE -->
+        <div id="tab-dashboard" class="tab-section active space-y-6">
+            <!-- 歡迎閃卡 -->
+            <div class="bg-gradient-to-r from-brand-black to-gray-800 rounded-2xl p-6 text-white shadow-md relative overflow-hidden">
+                <div class="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-10 text-[120px] font-black pointer-events-none font-mono">ECON</div>
+                <h2 class="text-xl font-bold mb-1">👋 歡迎回來，<span id="welcome-name">同學</span></h2>
+                <p id="welcome-meta" class="text-xs text-gray-400">正在同步 MM Choi 老師的控制台...</p>
+                <div class="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-700/50">
+                    <div><p class="text-[10px] text-gray-400 uppercase font-bold">欠交功課項目</p><p id="dash-missing-count" class="text-2xl font-bold font-mono text-red-400">0</p></div>
+                    <div><p class="text-[10px] text-gray-400 uppercase font-bold">下一個測考倒數</p><p id="dash-next-evt" class="text-base font-bold truncate text-orange-400">暫無排程</p></div>
+                </div>
+            </div>
+
+            <!-- 📅 測考排程與行事曆 Widget -->
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
+                    <h3 class="font-bold flex items-center gap-2 text-gray-800"><i class="ph ph-calendar text-brand-orange text-xl"></i>實時行事曆</h3>
+                    <span class="text-xs bg-brand-orange/10 text-brand-orange font-bold px-2 py-0.5 rounded-full font-mono">Live</span>
+                </div>
+                <div class="p-4 divide-y divide-gray-100" id="student-timetable-list">
+                    <!-- Dynamic Timetable Loading -->
+                    <div class="text-center py-6 text-gray-400 text-sm">正在讀取排程...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📓 分頁二：HOMEWORK HUB -->
+        <div id="tab-homework" class="tab-section space-y-6">
+            <!-- 科長特權切換區 (預設隱藏) -->
+            <div id="monitor-privilege-banner" class="hidden bg-orange-50 border border-brand-orange/30 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-brand-orange text-white flex items-center justify-center text-xl shadow-md"><i class="ph ph-shield-star"></i></div>
+                    <div>
+                        <h4 class="font-bold text-gray-900">偵測到科長權限 👑</h4>
+                        <p class="text-xs text-orange-700 mt-0.5">負責點收範圍：<span id="monitor-target-label" class="font-bold font-mono">未分配</span></p>
+                    </div>
+                </div>
+                <button id="btn-toggle-monitor-mode" class="w-full sm:w-auto bg-brand-black hover:bg-gray-800 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <i class="ph ph-toggle-left text-base"></i> 切換至科長點收面板
+                </button>
+            </div>
+
+            <!-- 視圖 A：常規學生功課清單 -->
+            <div id="view-student-hw" class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="p-4 bg-gray-50 border-b"><h3 class="font-bold flex items-center gap-2"><i class="ph ph-notebook text-brand-orange text-xl"></i>我的功課繳交進度</h3></div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-100 text-gray-700 border-b">
+                            <tr><th class="px-4 py-3">功課名稱</th><th class="px-4 py-3">截止日期</th><th class="px-4 py-3 text-center">狀態</th><th class="px-4 py-3 text-right">附註</th></tr>
+                        </thead>
+                        <tbody id="student-hw-tbody" class="divide-y divide-gray-100 bg-white">
+                            <tr><td colspan="4" class="text-center py-8 text-gray-400">正在加載功課進度...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 👑 視圖 B：科長核心點收面板 (預設隱藏) -->
+            <div id="view-monitor-panel" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">第一步：請選擇要點收的功課</label>
+                    <select id="monitor-hw-select" class="w-full p-3 border rounded-xl outline-none bg-white text-sm font-bold text-gray-800 border-gray-300 focus:border-brand-orange">
+                        <option value="">-- 請選擇功課 --</option>
+                    </select>
+                </div>
+
+                <!-- 點名打勾區 -->
+                <div id="monitor-checklist-card" class="hidden bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="p-4 bg-gray-50 border-b flex flex-wrap justify-between items-center gap-3">
+                        <div>
+                            <h3 class="font-bold text-gray-900 flex items-center gap-2"><i class="ph ph-check-square-offset text-brand-orange text-xl"></i>學生點收名冊</h3>
+                            <p class="text-xs text-gray-500 mt-0.5">點擊勾選代表「已交」，不勾選代表「未交」。</p>
+                        </div>
+                        
+                        <!-- 🔒 老師控制鎖狀態看板 -->
+                        <div id="lock-status-badge" class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-bold">
+                            <i class="ph ph-lock-open"></i> <span>讀寫解鎖中</span>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-100 border-b"><tr><th class="px-6 py-3">班別班號</th><th class="px-6 py-3">姓名</th><th class="px-6 py-3 text-center">手動登記繳交狀態</th></tr></thead>
+                            <tbody id="monitor-checklist-tbody" class="divide-y divide-gray-100 bg-white"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- 動作儲存區 -->
+                    <div class="p-4 bg-gray-50 border-t flex justify-between items-center flex-wrap gap-3">
+                        <button id="btn-save-monitor-draft" class="px-4 py-2.5 bg-gray-200 hover:bg-gray-300 font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 text-gray-700">
+                            <i class="ph ph-floppy-disk text-base"></i> 暫存為點收草稿
+                        </button>
+                        <button id="btn-submit-monitor-final" class="px-5 py-2.5 bg-brand-orange hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-orange-500/20">
+                            <i class="ph ph-paper-plane-right text-base"></i> 📥 確認收齊並鎖定提交
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 📊 分頁三：PERFORMANCE HUB -->
+        <div id="tab-performance" class="tab-section space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 數據卡片與大考清單 -->
+                <div class="lg:col-span-1 space-y-4">
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center text-center">
+                        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">當前評估表現等級</h4>
+                        <div id="perf-level-badge" class="text-2xl font-black text-brand-orange bg-orange-50 px-4 py-2 rounded-xl border border-brand-orange/20 mt-1 font-mono">Level --</div>
+                        <p class="text-[10px] text-gray-400 mt-2"><i class="ph ph-info"></i> 等級是由全級或組別排名動態拉曲線計算得出。</p>
+                    </div>
+                    
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">切換評核項目查看排名</label>
+                        <div id="perf-assessment-selector" class="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+                            <!-- Injected assessments radio -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 實時雷達圖與成績 Breakdown -->
+                <div class="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-200 flex flex-col justify-between">
+                    <div class="border-b pb-3 mb-4 flex justify-between items-center">
+                        <h3 class="font-bold flex items-center gap-2 text-gray-900"><i class="ph ph-chart-pie text-brand-orange text-xl"></i>個人學術能力分析畫像</h3>
+                        <span id="active-asmt-title" class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-bold">載入中 Assessment</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                        <div class="flex items-center justify-center p-2"><canvas id="studentRadarChart" width="260" height="260"></canvas></div>
+                        <div class="space-y-3 text-sm">
+                            <div class="bg-gray-50 p-3 rounded-xl border flex justify-between font-mono"><span>我的得分 (My Score):</span><strong id="perf-my-score" class="text-brand-orange text-base">--</strong></div>
+                            <div class="bg-gray-50 p-3 rounded-xl border flex justify-between font-mono"><span>該項滿分 (Max Mark):</span><strong id="perf-max-score" class="text-gray-900 text-base">--</strong></div>
+                            <div class="bg-gray-50 p-3 rounded-xl border flex justify-between font-mono"><span>同儕最高分 (Max Bench):</span><strong id="perf-cohort-max" class="text-green-600 text-base">--</strong></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 底部行動端快捷導航欄 -->
+    <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 h-16 flex md:hidden justify-around items-center z-40 shadow-lg">
+        <button data-tab="tab-dashboard" class="mobile-tab-btn flex flex-col items-center justify-center text-brand-orange font-bold text-[10px] gap-0.5"><i class="ph ph-house text-2xl"></i>首頁</button>
+        <button data-tab="tab-homework" class="mobile-tab-btn flex flex-col items-center justify-center text-gray-400 font-medium text-[10px] gap-0.5"><i class="ph ph-notebook text-2xl"></i>功課</button>
+        <button data-tab="tab-performance" class="mobile-tab-btn flex flex-col items-center justify-center text-gray-400 font-medium text-[10px] gap-0.5"><i class="ph ph-chart-bar text-2xl"></i>成績</button>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div id="toast-container" class="fixed bottom-20 right-4 flex flex-col gap-2 pointer-events-none z-[200]"></div>
+
+    <!-- Firebase SDK 模組與核心邏輯 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // 核心設定：請務必填寫您的 TEACHER_UID 🔒
+        // ==========================================
+        const TEACHER_UID = "Dl7MF105IwhBp9IJxsddVXPlCMA2"; // 👈 ⚠️ 部署前必須替換為真實 UID
+        
+        const firebaseConfig = { 
+            apiKey: "AIzaSyDW2AyTePCTS47IDK2XegUSBcAf8cjAfGY", 
+            authDomain: "teacher-dashboard-9c84a.firebaseapp.com", 
+            projectId: "teacher-dashboard-9c84a", 
+            storageBucket: "teacher-dashboard-9c84a.firebasestorage.app", 
+            messagingSenderId: "628238134519", 
+            appId: "1:628238134519:web:b8a0c8fdafd80065d437f2" 
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const googleProvider = new GoogleAuthProvider();
+        const db = getFirestore(app);
+
+        let myStudentId = null, myRecord = null;
+        let studentsData=[], homeworksData=[], submissionsData=[], assessmentsData=[], gradesData=[], timetableData=[], lockControlsData=[];
+        let unsubStudents, unsubHomeworks, unsubSubmissions, unsubAssessments, unsubGrades, unsubTimetable, unsubLocks;
+        let radarChartInstance = null, isMonitorMode = false;
+
+        const getColRef = (colName) => collection(db, 'users', TEACHER_UID, colName);
+        const getDocRef = (colName, docId) => doc(db, 'users', TEACHER_UID, colName, String(docId));
+
+        // 監聽登入
+        onAuthStateChanged(auth, async (user) => {
+            const overlay = document.getElementById('login-overlay');
+            if(user) {
+                myStudentId = user.email.split('@')[0].trim().toUpperCase(); // 提取 Email 前綴作為學號
+                document.getElementById('welcome-name').textContent = user.displayName || '同學';
+                overlay.classList.add('hidden');
+                startCoreListeners();
+            } else {
+                myStudentId = null; myRecord = null;
+                overlay.classList.remove('hidden');
+                stopAllListeners();
+            }
+        });
+
+        document.getElementById('btn-google-login').addEventListener('click', async () => {
+            try { await signInWithPopup(auth, googleProvider); } catch(e) { document.getElementById('login-status').textContent="登入失敗:"+e.message; document.getElementById('login-status').classList.remove('hidden'); }
+        });
+        document.getElementById('btn-logout').addEventListener('click', () => signOut(auth));
+
+        // 啟動實時監聽 (讀取老師資料庫的子集合)
+        function startCoreListeners() {
+            unsubStudents = onSnapshot(getColRef('students'), s => {
+                studentsData = s.docs.map(d=>({id:d.id, ...d.data()}));
+                myRecord = studentsData.find(st => st.studentId.toUpperCase() === myStudentId);
+                if(!myRecord) {
+                    signOut(auth);
+                    alert("權限錯誤：您的帳號不在老師的名單中，請確認使用正確的學校帳號！");
+                    return;
+                }
+                renderHeaderAndPrivileges();
+                renderAllViews();
+            });
+            unsubHomeworks = onSnapshot(getColRef('homeworks'), s => { homeworksData = s.docs.map(d=>({id:d.id, ...d.data()})); populateMonitorHwSelector(); renderAllViews(); });
+            unsubSubmissions = onSnapshot(getColRef('submissions'), s => { submissionsData = s.docs.map(d=>({id:d.id, ...d.data()})); renderAllViews(); });
+            unsubAssessments = onSnapshot(getColRef('assessments'), s => { assessmentsData = s.docs.map(d=>({id:d.id, ...d.data()})).filter(a=>a.status==='published'); renderAssessmentSelector(); renderAllViews(); });
+            unsubGrades = onSnapshot(getColRef('grades'), s => { gradesData = s.docs.map(d=>({id:d.id, ...d.data()})); renderAllViews(); });
+            unsubTimetable = onSnapshot(getColRef('timetable'), s => { timetableData = s.docs.map(d=>({id:d.id, ...d.data()})); renderTimetable(); });
+            unsubLocks = onSnapshot(getColRef('lockControls'), s => { lockControlsData = s.docs.map(d=>({id:d.id, ...d.data()})); checkLockStatus(); });
+        }
+
+        function stopAllListeners() {
+            if(unsubStudents) unsubStudents(); if(unsubHomeworks) unsubHomeworks(); if(unsubSubmissions) unsubSubmissions();
+            if(unsubAssessments) unsubAssessments(); if(unsubGrades) unsubGrades(); if(unsubTimetable) unsubTimetable(); if(unsubLocks) unsubLocks();
+        }
+
+        function getForm(cls) { if(!cls) return ''; const m = cls.match(/\d+/); return m ? m[0] : ''; }
+        
+        function isTargetMatch(target, stu) {
+            if(!target || target === 'ALL') return true;
+            if(target.startsWith('FORM_')) return getForm(stu.classGroup) === target.replace('FORM_','');
+            if(target.startsWith('GROUP_')) { const p = target.split('_'); return getForm(stu.classGroup) === p[1] && stu.subjectGroup === p[2]; }
+            if(target.startsWith('CLASS_')) return stu.classGroup === target.replace('CLASS_','');
+            return target === stu.classGroup || target === stu.subjectGroup;
+        }
+
+        function formatTargetDisplay(target) {
+            if(!target || target === 'ALL') return '全級/全校';
+            if(target.startsWith('FORM_')) return `S${target.replace('FORM_','')}`;
+            if(target.startsWith('GROUP_')) { const p = target.split('_'); return `S${p[1]} ${p[2]}`; }
+            if(target.startsWith('CLASS_')) return target.replace('CLASS_','');
+            return target;
+        }
+
+        function renderHeaderAndPrivileges() {
+            if(!myRecord) return;
+            const formStr = getForm(myRecord.classGroup);
+            document.getElementById('stu-display-name').textContent = myRecord.name;
+            document.getElementById('stu-display-meta').textContent = `S${formStr} ${myRecord.subjectGroup || ''} | ${myRecord.classGroup}-${myRecord.classNo}`;
+            document.getElementById('welcome-meta').textContent = `目前班別: ${myRecord.classGroup} 班 ${myRecord.classNo} 號 | 選修組別: ${myRecord.subjectGroup || '無'}`;
+            
+            // 👑 科長功能解鎖偵測
+            if(myRecord.isMonitor) {
+                document.getElementById('monitor-privilege-banner').classList.remove('hidden');
+                document.getElementById('monitor-target-label').textContent = formatTargetDisplay(myRecord.targetClass);
+            } else {
+                document.getElementById('monitor-privilege-banner').classList.add('hidden');
+            }
+        }
+
+        // ==========================================
+        // 🏠 Tab 1: Live Timetable 
+        // ==========================================
+        function renderTimetable() {
+            const list = document.getElementById('student-timetable-list'); list.innerHTML = '';
+            if(!myRecord) return;
+            let myEvents = timetableData.filter(e => isTargetMatch(e.classGroup, myRecord)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+            const today = new Date(); today.setHours(0,0,0,0);
+            myEvents = myEvents.filter(e => new Date(e.date) >= today);
+
+            if(myEvents.length === 0) {
+                list.innerHTML = '<div class="text-center py-6 text-gray-400 text-sm">🎉 太棒了！近期內沒有小測、大考或繳交提醒。</div>';
+                document.getElementById('dash-next-evt').textContent = "暫無排程";
+                return;
+            }
+
+            document.getElementById('dash-next-evt').textContent = `${myEvents[0].title} (${new Date(myEvents[0].date).toLocaleDateString('zh-TW', {month:'short',day:'numeric'})})`;
+
+            myEvents.forEach(evt => {
+                let ic='ph-bell', clr='text-blue-600 bg-blue-50 border-blue-200';
+                if(evt.type==='Quiz') { ic='ph-file-text'; clr='text-orange-600 bg-orange-50 border-orange-200'; }
+                else if(evt.type==='Test') { ic='ph-exam'; clr='text-red-600 bg-red-50 border-red-200'; }
+                
+                const daysLeft = Math.ceil((new Date(evt.date) - today) / (1000 * 60 * 60 * 24));
+                const countdownText = daysLeft === 0 ? "今天考核 📢" : `還有 ${daysLeft} 天`;
+                const dHtml = evt.details ? `<div class="mt-1.5 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg border border-gray-100"><i class="ph ph-info mr-1"></i>考核範圍：${evt.details}</div>` : '';
+
+                list.innerHTML += `
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between py-3.5 gap-2 border-b border-gray-100 last:border-0">
+                        <div class="flex items-start gap-3">
+                            <div class="w-10 h-10 rounded-xl border flex items-center justify-center text-xl shrink-0 ${clr}"><i class="ph ${ic}"></i></div>
+                            <div>
+                                <span class="text-[10px] bg-gray-200 text-gray-600 font-bold px-1.5 py-0.5 rounded uppercase">${evt.type}</span>
+                                <h4 class="font-bold text-gray-900 text-sm mt-0.5">${evt.title}</h4>
+                                ${dHtml}
+                            </div>
+                        </div>
+                        <div class="text-right shrink-0">
+                            <span class="text-xs font-bold ${daysLeft<=2?'text-red-500':'text-gray-500'} font-mono">${new Date(evt.date).toLocaleDateString('zh-TW')} (${countdownText})</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // ==========================================
+        // 📓 Tab 2: Homework Hub & 👑 Monitor Mode
+        // ==========================================
+        function renderAllViews() {
+            if(!myRecord) return;
+            renderStudentHomeworkTable();
+            if(isMonitorMode) renderMonitorChecklist();
+        }
+
+        function renderStudentHomeworkTable() {
+            const tbody = document.getElementById('student-hw-tbody'); tbody.innerHTML = '';
+            let myHws = homeworksData.filter(h => isTargetMatch(h.target, myRecord));
+            let missingCount = 0;
+
+            if(myHws.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-400">目前沒有需要你提交的功課。</td></tr>`;
+                return;
+            }
+
+            myHws.forEach(hw => {
+                const sub = submissionsData.find(s => s.id === `${hw.id}_${myRecord.studentId}`) || {status:'missing'};
+                let badge = `<span class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">未交 Missing</span>`;
+                if(sub.status==='submitted') badge = `<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">已交 (準時)</span>`;
+                else if(sub.status==='late_submitted') badge = `<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold">已補交</span>`;
+                
+                if(sub.status==='missing') missingCount++;
+
+                tbody.innerHTML += `
+                    <tr class="border-b hover:bg-gray-50/50">
+                        <td class="px-4 py-3 font-bold text-gray-900">${hw.title}</td>
+                        <td class="px-4 py-3 text-xs text-gray-500 font-mono">${new Date(hw.dueDate).toLocaleString('zh-TW', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</td>
+                        <td class="px-4 py-3 text-center">${badge}</td>
+                        <td class="px-4 py-3 text-right text-xs text-gray-400 font-mono">${sub.lateDays>0? `遲交 ${sub.lateDays} 天`:''}</td>
+                    </tr>
+                `;
+            });
+            document.getElementById('dash-missing-count').textContent = missingCount;
+        }
+
+        // 👑 科長專用：填充功課選單
+        function populateMonitorHwSelector() {
+            if(!myRecord || !myRecord.isMonitor) return;
+            const sel = document.getElementById('monitor-hw-select');
+            const currentVal = sel.value;
+            let availHws = homeworksData.filter(h => h.target === 'ALL' || h.target === myRecord.targetClass || myRecord.targetClass === 'ALL');
+            sel.innerHTML = `<option value="">-- 請選擇要點收的功課 --</option>` + availHws.map(h => `<option value="${h.id}">${h.title}</option>`).join('');
+            if(currentVal) sel.value = currentVal;
+        }
+
+        // 👑 點收面板切換
+        document.getElementById('btn-toggle-monitor-mode').addEventListener('click', (e) => {
+            isMonitorMode = !isMonitorMode;
+            const btn = e.currentTarget;
+            if(isMonitorMode) {
+                btn.innerHTML = `<i class="ph ph-toggle-right text-lg text-orange-500"></i> 返回個人功課面板`;
+                document.getElementById('view-student-hw').classList.add('hidden');
+                document.getElementById('view-monitor-panel').classList.remove('hidden');
+                renderMonitorChecklist();
+            } else {
+                btn.innerHTML = `<i class="ph ph-toggle-left text-lg"></i> 切換至科長點收面板`;
+                document.getElementById('view-student-hw').classList.remove('hidden');
+                document.getElementById('view-monitor-panel').classList.add('hidden');
+            }
+        });
+
+        document.getElementById('monitor-hw-select').addEventListener('change', renderMonitorChecklist);
+
+        function checkLockStatus() {
+            const hwId = document.getElementById('monitor-hw-select').value;
+            if(!hwId || !myRecord) return false;
+            const lockId = `${hwId}_${myRecord.targetClass}`;
+            const isLocked = lockControlsData.find(l => l.id === lockId && l.status === 'locked');
+            
+            const badge = document.getElementById('lock-status-badge');
+            const btnDraft = document.getElementById('btn-save-monitor-draft');
+            const realBtnFinal = document.getElementById('btn-submit-monitor-final');
+
+            if(isLocked) {
+                badge.className = "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-bold bg-red-100 text-red-700 border border-red-200";
+                badge.innerHTML = `<i class="ph ph-lock"></i> <span>已提交鎖定 (唯讀)</span>`;
+                if(btnDraft) btnDraft.disabled = true;
+                if(realBtnFinal) { realBtnFinal.disabled = true; realBtnFinal.className = "px-5 py-2.5 bg-gray-300 text-gray-400 font-bold rounded-xl text-xs cursor-not-allowed flex items-center gap-1.5"; }
+                return true;
+            } else {
+                badge.className = "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-bold bg-green-100 text-green-700 border border-green-200";
+                badge.innerHTML = `<i class="ph ph-lock-open"></i> <span>讀寫解鎖中</span>`;
+                if(btnDraft) btnDraft.disabled = false;
+                if(realBtnFinal) { realBtnFinal.disabled = false; realBtnFinal.className = "px-5 py-2.5 bg-brand-orange hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-orange-500/20"; }
+                return false;
+            }
+        }
+
+        function renderMonitorChecklist() {
+            const hwId = document.getElementById('monitor-hw-select').value;
+            const card = document.getElementById('monitor-checklist-card');
+            const tbody = document.getElementById('monitor-checklist-tbody');
+            
+            if(!hwId) { card.classList.add('hidden'); return; }
+            card.classList.remove('hidden'); tbody.innerHTML = '';
+
+            const isLocked = checkLockStatus();
+
+            let targetStudents = studentsData.filter(s => s.status === 'active' && isTargetMatch(myRecord.targetClass, s));
+            
+            if(targetStudents.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" class="text-center py-6 text-gray-400">名單中沒有符合此組別的學生。</td></tr>`;
+                return;
+            }
+
+            targetStudents.forEach(stu => {
+                const sub = submissionsData.find(s => s.id === `${hwId}_${stu.studentId}`);
+                const isChecked = sub && sub.status !== 'missing' ? 'checked' : '';
+
+                tbody.innerHTML += `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="px-6 py-3 font-mono font-bold">${stu.classGroup} / ${stu.classNo || '-'}</td>
+                        <td class="px-6 py-3 font-medium text-gray-900">${stu.name}</td>
+                        <td class="px-6 py-3 text-center">
+                            <input type="checkbox" class="monitor-check-box w-5 h-5 text-brand-orange focus:ring-brand-orange rounded" 
+                                data-stuid="${stu.studentId}" ${isChecked ? 'checked' : ''} ${isLocked ? 'disabled' : ''}>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        // 科長點收儲存
+        async function saveMonitorSubmissions(isFinalLock = false) {
+            const hwId = document.getElementById('monitor-hw-select').value;
+            if(!hwId) return;
+            const checkboxes = document.querySelectorAll('.monitor-check-box');
+            
+            showToast("正在更新名單狀態...", "info");
+            let promises = [];
+
+            checkboxes.forEach(cb => {
+                const stuId = cb.dataset.stuid;
+                const isChecked = cb.checked;
+                const existingSub = submissionsData.find(s => s.id === `${hwId}_${stuId}`);
+                
+                let finalStatus = isChecked ? (existingSub?.status && existingSub.status !== 'missing' ? existingSub.status : 'submitted') : 'missing';
+                let lateDays = existingSub?.lateDays || 0;
+
+                promises.push(setDoc(getDocRef('submissions', `${hwId}_${stuId}`), {
+                    homeworkId: hwId, studentId: stuId, status: finalStatus, lateDays: lateDays, updatedAt: new Date().toISOString()
+                }, {merge: true}));
+            });
+
+            if(isFinalLock) {
+                const lockId = `${hwId}_${myRecord.targetClass}`;
+                promises.push(setDoc(getDocRef('lockControls', lockId), {
+                    id: lockId, homeworkId: hwId, targetGroup: myRecord.targetClass, status: 'locked', submittedBy: currentUserEmail(), lockedAt: new Date().toISOString()
+                }));
+            }
+
+            await Promise.all(promises);
+            showToast(isFinalLock ? "🔒 狀態已提交鎖定，無法再更改！" : "✅ 暫存草稿成功！", "success");
+        }
+
+        function currentUserEmail() { return auth.currentUser ? auth.currentUser.email : ''; }
+
+        document.getElementById('btn-save-monitor-draft').addEventListener('click', () => saveMonitorSubmissions(false));
+        document.getElementById('btn-submit-monitor-final').addEventListener('click', () => {
+            if(confirm("⚠️ 確定要確認收齊並封鎖嗎？\n提交後你將無法再更改狀態，除非老師為你遠端解鎖。")) {
+                saveMonitorSubmissions(true);
+            }
+        });
+
+
+        // ==========================================
+        // 📊 Tab 3: Performance Hub 
+        // ==========================================
+        function renderAssessmentSelector() {
+            const container = document.getElementById('perf-assessment-selector');
+            const cachedVal = container.querySelector('input[name="perf-asmt-radio"]:checked')?.value;
+            container.innerHTML = '';
+
+            // 僅顯示有開放對象包含自己的測驗
+            const visibleAsmts = assessmentsData.filter(a => isTargetMatch(a.target, myRecord));
+
+            if(visibleAsmts.length === 0) {
+                container.innerHTML = '<p class="text-xs text-gray-400">目前暫無已發佈的成績。</p>';
+                return;
+            }
+
+            visibleAsmts.forEach((asm, idx) => {
+                const isChecked = cachedVal ? (asm.id === cachedVal) : (idx === 0);
+                container.innerHTML += `
+                    <label class="flex items-center gap-2 p-2.5 border rounded-xl cursor-pointer hover:bg-gray-50 text-xs font-bold text-gray-700">
+                        <input type="radio" name="perf-asmt-radio" value="${asm.id}" class="text-brand-orange focus:ring-brand-orange" 
+                            ${isChecked?'checked':''} onchange="window.triggerStudentPerfUpdate()">
+                        <span class="truncate flex-1">${asm.title}</span>
+                        <span class="text-[10px] bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-mono">/${asm.maxScore}</span>
+                    </label>
+                `;
+            });
+            
+            setTimeout(() => window.triggerStudentPerfUpdate(), 50);
+        }
+
+        window.triggerStudentPerfUpdate = () => {
+            const selId = document.querySelector('input[name="perf-asmt-radio"]:checked')?.value;
+            if(!selId || !myRecord) return;
+
+            const asm = assessmentsData.find(a => a.id === selId);
+            document.getElementById('active-asmt-title').textContent = asm.title;
+
+            // 🎯 動態拉曲線
+            let peerStudents = studentsData.filter(s => s.status === 'active' && isTargetMatch(asm.target, s));
+            let cohortScores = [];
+            let myScoreNum = null, myOutput = '--';
+
+            peerStudents.forEach(stu => {
+                const gDoc = gradesData.find(g => g.id === `${asm.id}_${stu.studentId}`);
+                if(gDoc && gDoc.score !== 'ABS' && gDoc.score !== '-' && gDoc.score !== '') {
+                    const sc = Number(gDoc.score);
+                    cohortScores.push(sc);
+                    if(stu.studentId === myRecord.studentId) {
+                        myScoreNum = sc;
+                        myOutput = gDoc.score;
+                    }
+                } else if(stu.studentId === myRecord.studentId && gDoc?.score === 'ABS') {
+                    myOutput = '[-] ABS';
+                }
+            });
+
+            cohortScores.sort((a, b) => b - a);
+
+            let myLevel = 'Level --';
+            if(myScoreNum !== null && cohortScores.length > 0) {
+                const rank = cohortScores.indexOf(myScoreNum) + 1;
+                const pct = rank / cohortScores.length;
+                if(pct <= 0.25) myLevel = 'Level 4 (Top 25%)';
+                else if(pct <= 0.50) myLevel = 'Level 3 (Top 50%)';
+                else if(pct <= 0.75) myLevel = 'Level 2 (Top 75%)';
+                else myLevel = 'Level 1 (Bottom 25%)';
+            }
+
+            document.getElementById('perf-level-badge').textContent = myLevel.split(' ')[0];
+            document.getElementById('perf-my-score').textContent = myOutput;
+            document.getElementById('perf-max-score').textContent = asm.maxScore;
+            document.getElementById('perf-cohort-max').textContent = cohortScores.length > 0 ? Math.max(...cohortScores) : '--';
+
+            updateRadarChart(asm.tag, myScoreNum, asm.maxScore);
+        };
+
+        function updateRadarChart(tag, myScore, maxScore) {
+            const ctx = document.getElementById('studentRadarChart').getContext('2d');
+            const labels = ['SDL能力', 'Short Quiz', 'Term Test', 'Final Exam'];
+            
+            let dataPoints = [0, 0, 0, 0];
+            const pct = myScore !== null ? Math.round((myScore / maxScore) * 100) : 0;
+            
+            if(tag === 'SDL') dataPoints[0] = pct;
+            else if(tag === 'Quiz') dataPoints[1] = pct;
+            else if(tag === 'Test') dataPoints[2] = pct;
+            else if(tag === 'Exam') dataPoints[3] = pct;
+
+            if(radarChartInstance) radarChartInstance.destroy();
+            radarChartInstance = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '得分率 (%)',
+                        data: dataPoints,
+                        backgroundColor: 'rgba(249, 115, 22, 0.2)',
+                        borderColor: '#F97316',
+                        pointBackgroundColor: '#171717',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    scales: { r: { min: 0, max: 100, ticks: { stepSize: 25 } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+
+        // ==========================================
+        // 快捷分頁切換邏輯
+        // ==========================================
+        document.querySelectorAll('.tab-btn, .mobile-tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetTab = e.currentTarget.getAttribute('data-tab');
+                const cleanId = targetTab;
+                
+                document.querySelectorAll('.tab-btn').forEach(b => b.className = "tab-btn px-4 py-2 rounded-lg font-medium text-gray-500 hover:bg-gray-100 flex items-center gap-2");
+                document.querySelectorAll('.mobile-tab-btn').forEach(b => b.className = "mobile-tab-btn flex flex-col items-center justify-center text-gray-400 font-medium text-[10px] gap-0.5");
+                
+                const dt = `[data-tab="${cleanId}"]`;
+                document.querySelectorAll(dt).forEach(b => {
+                    if(b.classList.contains('mobile-tab-btn')) b.className = "mobile-tab-btn flex flex-col items-center justify-center text-brand-orange font-bold text-[10px] gap-0.5";
+                    else b.className = "tab-btn px-4 py-2 rounded-lg font-medium text-brand-orange bg-brand-orange/10 flex items-center gap-2";
+                });
+
+                document.querySelectorAll('.tab-section').forEach(el => el.classList.remove('active'));
+                document.getElementById(cleanId).classList.add('active');
+            });
+        });
+
+        function showToast(msg, type="info") {
+            const container = document.getElementById('toast-container'), t = document.createElement('div');
+            const clr = type==="success"?"bg-green-800":type==="error"?"bg-red-600":"bg-brand-black";
+            t.className = `flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-white font-medium text-xs border border-white/10 ${clr}`;
+            t.innerHTML = `<i class="ph ph-info-circle text-base"></i> <span>${msg}</span>`;
+            container.appendChild(t); setTimeout(() => t.remove(), 3500);
+        }
+    </script>
+</body>
+</html>
